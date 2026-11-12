@@ -1,3 +1,4 @@
+using System;
 using ArenaBreak.Core;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -33,6 +34,11 @@ namespace ArenaBreak.Player
         [SerializeField] private float _hitMarkerSize = 0.2f;
         [SerializeField] private float _hitMarkerLifetime = 0.5f;
 
+        [Header("Hit Particles")]
+        // 씬에 하나만 두고 위치를 옮겨 가며 재사용한다. 비워 두면 파티클 없이 동작한다
+        [SerializeField] private ParticleSystem _hitParticles;
+        [SerializeField] private int _hitParticleCount = 8;
+
         private InputAction _attackAction;
         // 에셋에 R 액션이 없어서 코드에서 직접 만든다. 소유하므로 직접 Dispose 해야 한다
         private InputAction _reloadAction;
@@ -42,6 +48,14 @@ namespace ArenaBreak.Player
         private float _nextFireTime;
         private bool _isReloading;
         private float _reloadEndTime;
+
+        // (현재 탄약, 탄창 크기). 값이 바뀔 때만 발행하므로 초기값은 프로퍼티로 읽는다
+        public event Action<int, int> OnAmmoChanged;
+        // IDamageable에 명중해 데미지를 준 순간. 벽·바닥 명중에는 발행하지 않는다
+        public event Action OnTargetHit;
+
+        public int Ammo => _ammo;
+        public int MagazineSize => _magazineSize;
 
         private void Awake()
         {
@@ -116,15 +130,21 @@ namespace ArenaBreak.Player
 
             _ammo--;
             _nextFireTime = Time.time + _fireInterval;
+            OnAmmoChanged?.Invoke(_ammo, _magazineSize);
 
             Ray ray = _camera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
             if (Physics.Raycast(ray, out RaycastHit hit, _range, _hitMask, QueryTriggerInteraction.Ignore))
             {
                 SpawnHitMarker(hit.point);
+                PlayHitParticles(hit);
 
                 // 맞은 콜라이더가 자식일 수 있어 부모까지 찾는다. 명중 순간에만 호출되므로 캐싱 대상이 아니다
                 IDamageable target = hit.collider.GetComponentInParent<IDamageable>();
-                target?.TakeDamage(_damage);
+                if (target != null)
+                {
+                    target.TakeDamage(_damage);
+                    OnTargetHit?.Invoke();
+                }
             }
 
             // HUD 이벤트로 옮기기 전까지 임시 출력
@@ -147,7 +167,21 @@ namespace ArenaBreak.Player
         {
             _isReloading = false;
             _ammo = _magazineSize;
+            OnAmmoChanged?.Invoke(_ammo, _magazineSize);
             Debug.LogFormat("재장전 완료 - 남은 탄약 {0}/{1}", _ammo, _magazineSize);
+        }
+
+        // 연사마다 파티클 오브젝트를 만들고 지우지 않도록 하나를 옮겨 Emit만 한다.
+        // 파티클이 표면 바깥으로 튀도록 명중 면의 법선 방향으로 돌린다
+        private void PlayHitParticles(RaycastHit hit)
+        {
+            if (_hitParticles == null)
+            {
+                return;
+            }
+
+            _hitParticles.transform.SetPositionAndRotation(hit.point, Quaternion.LookRotation(hit.normal));
+            _hitParticles.Emit(_hitParticleCount);
         }
 
         // 풀링 대상: 연사 시 생성/파괴가 반복된다. 디버그 전용이라 지금은 Destroy로 둔다

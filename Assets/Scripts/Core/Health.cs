@@ -26,6 +26,14 @@ namespace ArenaBreak.Core
             _currentHealth = _maxHealth;
         }
 
+        // 풀에서 재사용되는 적이 이전 생의 사망 상태와 무적 시간을 물려받지 않도록 되돌린다
+        public void ResetHealth()
+        {
+            _currentHealth = _maxHealth;
+            _invulnerableUntil = 0f;
+            OnHealthChanged?.Invoke(_currentHealth, _maxHealth);
+        }
+
         public void TakeDamage(int amount)
         {
             // 사망 후 연사 중인 총알이 OnDied를 두 번 일으키지 않도록 막는다
